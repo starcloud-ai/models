@@ -278,7 +278,7 @@ def input_fn(data_dir,
       batched_dataset = dataset.get_batched_dataset(batch_size)
       return batched_dataset
 
-    batched_dataset = dataset.get_batched_dataset(batch_size/num_shards)
+    batched_dataset = dataset.get_batched_dataset(int(batch_size / num_shards))
     return batched_dataset
 
 # remove the using of experiment and update to tf.estimator
