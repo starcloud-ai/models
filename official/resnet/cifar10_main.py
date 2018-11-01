@@ -254,7 +254,6 @@ def run_cifar(flags_obj):
     tf.logging.fatal('--image_bytes_as_serving_input cannot be set to True '
                      'for CIFAR. This flag is only applicable to ImageNet.')
     return
-
   input_function = (flags_obj.use_synthetic_data and
                     get_synth_input_fn(flags_core.get_tf_dtype(flags_obj)) or
                     input_fn)

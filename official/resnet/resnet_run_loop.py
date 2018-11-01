@@ -467,9 +467,7 @@ def resnet_main(
       intra_op_parallelism_threads=flags_obj.intra_op_parallelism_threads,
       allow_soft_placement=True)
 
-  distribution_strategy = distribution_utils.get_distribution_strategy(
-      flags_core.get_num_gpus(flags_obj), flags_obj.all_reduce_alg)
-
+  distribution_strategy = tf.contrib.distribute.CollectiveAllReduceStrategy(num_gpus_per_worker=1)
   # Creates a `RunConfig` that checkpoints every 24 hours which essentially
   # results in checkpoints determined only by `epochs_between_evals`.
   run_config = tf.estimator.RunConfig(
@@ -555,27 +553,32 @@ def resnet_main(
 
   for cycle_index, num_train_epochs in enumerate(schedule):
     tf.logging.info('Starting cycle: %d/%d', cycle_index, int(n_loops))
+    # if num_train_epochs:
+    #   classifier.train(input_fn=lambda: input_fn_train(num_train_epochs),
+    #                    hooks=train_hooks, max_steps=flags_obj.max_train_steps)
+    #
+    # tf.logging.info('Starting to evaluate.')
+    #
+    # # flags_obj.max_train_steps is generally associated with testing and
+    # # profiling. As a result it is frequently called with synthetic data, which
+    # # will iterate forever. Passing steps=flags_obj.max_train_steps allows the
+    # # eval (which is generally unimportant in those circumstances) to terminate.
+    # # Note that eval will run for max_train_steps each loop, regardless of the
+    # # global_step count.
+    # eval_results = classifier.evaluate(input_fn=input_fn_eval,
+    #                                    steps=flags_obj.max_train_steps)
+    #
+    # benchmark_logger.log_evaluation_result(eval_results)
+    #
+    # if model_helpers.past_stop_threshold(
+    #     flags_obj.stop_threshold, eval_results['accuracy']):
+    #   break
+    train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn_train(num_train_epochs), max_steps=flags_obj.max_train_steps)
+    eval_spec = tf.estimator.EvalSpec(input_fn=input_fn_eval)
 
-    if num_train_epochs:
-      classifier.train(input_fn=lambda: input_fn_train(num_train_epochs),
-                       hooks=train_hooks, max_steps=flags_obj.max_train_steps)
-
-    tf.logging.info('Starting to evaluate.')
-
-    # flags_obj.max_train_steps is generally associated with testing and
-    # profiling. As a result it is frequently called with synthetic data, which
-    # will iterate forever. Passing steps=flags_obj.max_train_steps allows the
-    # eval (which is generally unimportant in those circumstances) to terminate.
-    # Note that eval will run for max_train_steps each loop, regardless of the
-    # global_step count.
-    eval_results = classifier.evaluate(input_fn=input_fn_eval,
-                                       steps=flags_obj.max_train_steps)
-
-    benchmark_logger.log_evaluation_result(eval_results)
-
-    if model_helpers.past_stop_threshold(
-        flags_obj.stop_threshold, eval_results['accuracy']):
-      break
+    print("Train is starting.")
+    tf.estimator.train_and_evaluate(classifier, train_spec, eval_spec)
+    print("Train finished.")
 
   if flags_obj.export_dir is not None:
     # Exports a saved model for the given classifier.
