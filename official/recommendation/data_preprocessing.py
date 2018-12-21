@@ -351,8 +351,8 @@ def construct_cache(dataset, data_dir, num_data_readers, match_mlperf,
   st = timeit.default_timer()
   cache_root = os.path.join(data_dir, cache_paths.cache_root)
   if tf.gfile.Exists(cache_root):
-    raise ValueError("{} unexpectedly already exists."
-                     .format(cache_paths.cache_root))
+      tf.gfile.DeleteRecursively(cache_root)
+
   tf.logging.info("Creating cache directory. This should be deleted on exit.")
   tf.gfile.MakeDirs(cache_paths.cache_root)
 
@@ -649,6 +649,7 @@ def make_input_fn(
 
     deserialize = make_deserialize(params, batch_size, is_training)
     dataset = record_files_ds.apply(interleave)
+    dataset = dataset.repeat(5)
     dataset = dataset.map(deserialize, num_parallel_calls=4)
     dataset = dataset.prefetch(32)
 

@@ -111,17 +111,39 @@ def construct_estimator(num_gpus, model_dir, iterations, params, batch_size,
 
     return train_estimator, eval_estimator
 
-  distribution = distribution_utils.get_distribution_strategy(num_gpus=num_gpus)
-  run_config = tf.estimator.RunConfig(train_distribute=distribution,
-                                      eval_distribute=distribution)
   params["eval_batch_size"] = eval_batch_size
   model_fn = neumf_model.neumf_model_fn
   if params["use_xla_for_gpu"]:
     tf.logging.info("Using XLA for GPU for training and evaluation.")
     model_fn = xla.estimator_model_fn(model_fn)
+
+  tf.logging.info("num_gpus is %d in construct_estimator" % num_gpus)
+  distribute_strategy = params['distribute_strategy']
+  if distribute_strategy == 'ParameterServer':
+    distribution = tf.contrib.distribute.ParameterServerStrategy(num_gpus_per_worker=num_gpus)
+    tf.logging.info("distribute strategy is ParameterServer")
+  elif distribute_strategy == 'Mirror':
+    tf.logging.info("distribute strategy is Mirror")
+    # distribution = distribution_utils.get_distribution_strategy(num_gpus=num_gpus)
+    distribution = tf.contrib.distribute.MirroredStrategy(num_gpus_per_worker=num_gpus)
+  elif distribute_strategy == 'CollectiveAllReduce':
+    tf.logging.info("distribute strategy is CollectiveAllReduce")
+    distribution = tf.contrib.distribute.CollectiveAllReduceStrategy(num_gpus_per_worker=num_gpus)
+  else:
+    tf.logging.info("No distribute strategy found,exit")
+    exit(1)
+
+  run_config = tf.estimator.RunConfig(
+    model_dir=model_dir,
+    log_step_count_steps=10,
+    train_distribute=distribution,
+    eval_distribute=distribution,
+    save_checkpoints_steps=None,
+    save_checkpoints_secs=None
+  )
   estimator = tf.estimator.Estimator(model_fn=model_fn, model_dir=model_dir,
                                      config=run_config, params=params)
-  return estimator, estimator
+  return estimator
 
 
 def main(_):
@@ -184,6 +206,7 @@ def run_ncf(_):
   model_helpers.apply_clean(flags.FLAGS)
 
   params = {
+      "distribute_strategy":FLAGS.distribute_strategy,
       "use_seed": FLAGS.seed is not None,
       "hash_pipeline": FLAGS.hash_pipeline,
       "batch_size": batch_size,
@@ -208,7 +231,7 @@ def run_ncf(_):
       "use_estimator": FLAGS.use_estimator,
   }
   if FLAGS.use_estimator:
-    train_estimator, eval_estimator = construct_estimator(
+    estimator = construct_estimator(
         num_gpus=num_gpus, model_dir=FLAGS.model_dir,
         iterations=num_train_steps, params=params,
         batch_size=flags.FLAGS.batch_size, eval_batch_size=eval_batch_size)
@@ -217,12 +240,23 @@ def run_ncf(_):
                                          num_eval_steps, FLAGS.use_while_loop)
 
   # Create hooks that log information about the training and metric values
-  train_hooks = hooks_helper.get_train_hooks(
-      FLAGS.hooks,
-      model_dir=FLAGS.model_dir,
+  example_hook = hooks_helper.get_train_hooks(
+      ["ExamplesPerSecondHook"],
+      every_n_steps=10,
       batch_size=FLAGS.batch_size,  # for ExamplesPerSecondHook
       tensors_to_log={"cross_entropy": "cross_entropy"}
   )
+
+  profiler_hook = hooks_helper.get_train_hooks(
+      ["ProfilerHook"],
+      model_dir=FLAGS.model_dir,
+      save_steps=100,
+  )
+
+  train_hooks = []
+  train_hooks.append(example_hook[0])
+  train_hooks.append(profiler_hook[0])
+
   run_params = {
       "batch_size": FLAGS.batch_size,
       "eval_batch_size": eval_batch_size,
@@ -230,13 +264,6 @@ def run_ncf(_):
       "hr_threshold": FLAGS.hr_threshold,
       "train_epochs": FLAGS.train_epochs,
   }
-  benchmark_logger = logger.get_benchmark_logger()
-  benchmark_logger.log_run_info(
-      model_name="recommendation",
-      dataset_name=FLAGS.dataset,
-      run_params=run_params,
-      test_id=FLAGS.benchmark_test_id)
-
 
   eval_input_fn = None
   target_reached = False
@@ -255,32 +282,16 @@ def run_ncf(_):
         data_preprocessing.make_input_fn(
             ncf_dataset=ncf_dataset, is_training=True)
 
-      if batch_count != num_train_steps:
-        raise ValueError(
-            "Step counts do not match. ({} vs. {}) The async process is "
-            "producing incorrect shards.".format(batch_count, num_train_steps))
-
-      train_estimator.train(input_fn=train_input_fn, hooks=train_hooks,
-                            steps=num_train_steps)
-      if train_record_dir:
-        tf.gfile.DeleteRecursively(train_record_dir)
-
-      tf.logging.info("Beginning evaluation.")
       if eval_input_fn is None:
         eval_input_fn, _, eval_batch_count = data_preprocessing.make_input_fn(
             ncf_dataset=ncf_dataset, is_training=False)
 
-        if eval_batch_count != num_eval_steps:
-          raise ValueError(
-              "Step counts do not match. ({} vs. {}) The async process is "
-              "producing incorrect shards.".format(
-                  eval_batch_count, num_eval_steps))
-
-      mlperf_helper.ncf_print(key=mlperf_helper.TAGS.EVAL_START,
-                              value=cycle_index)
-      eval_results = eval_estimator.evaluate(eval_input_fn,
-                                             steps=num_eval_steps)
-      tf.logging.info("Evaluation complete.")
+      train_spec = tf.estimator.TrainSpec(train_input_fn,max_steps=5000,hooks=train_hooks)
+      eval_spec = tf.estimator.EvalSpec(eval_input_fn,steps=100)
+      tf.estimator.train_and_evaluate(estimator,train_spec,eval_spec)
+      
+      if train_record_dir:
+        tf.gfile.DeleteRecursively(train_record_dir)    
     else:
       runner.train()
       tf.logging.info("Beginning evaluation.")
@@ -288,39 +299,9 @@ def run_ncf(_):
                               value=cycle_index)
       eval_results = runner.eval()
       tf.logging.info("Evaluation complete.")
-    hr = float(eval_results[rconst.HR_KEY])
-    ndcg = float(eval_results[rconst.NDCG_KEY])
-
-    mlperf_helper.ncf_print(
-        key=mlperf_helper.TAGS.EVAL_TARGET,
-        value={"epoch": cycle_index, "value": FLAGS.hr_threshold})
-    mlperf_helper.ncf_print(key=mlperf_helper.TAGS.EVAL_ACCURACY,
-                            value={"epoch": cycle_index, "value": hr})
-    mlperf_helper.ncf_print(
-        key=mlperf_helper.TAGS.EVAL_HP_NUM_NEG,
-        value={"epoch": cycle_index, "value": rconst.NUM_EVAL_NEGATIVES})
-
-    # Logged by the async process during record creation.
-    mlperf_helper.ncf_print(key=mlperf_helper.TAGS.EVAL_HP_NUM_USERS,
-                            deferred=True)
-
-    mlperf_helper.ncf_print(key=mlperf_helper.TAGS.EVAL_STOP, value=cycle_index)
-
-    # Benchmark the evaluation results
-    benchmark_logger.log_evaluation_result(eval_results)
-    # Log the HR and NDCG results.
-    tf.logging.info(
-        "Iteration {}: HR = {:.4f}, NDCG = {:.4f}".format(
-            cycle_index + 1, hr, ndcg))
-
-    # If some evaluation threshold is met
-    if model_helpers.past_stop_threshold(FLAGS.hr_threshold, hr):
-      target_reached = True
-      break
-
-  mlperf_helper.ncf_print(key=mlperf_helper.TAGS.RUN_STOP,
-                          value={"success": target_reached})
-  cleanup_fn()  # Cleanup data construction artifacts and subprocess.
+  
+  # Cleanup data construction artifacts and subprocess.
+  cleanup_fn()  
 
   # Clear the session explicitly to avoid session delete error
   tf.keras.backend.clear_session()
@@ -454,6 +435,14 @@ def define_ncf_flags():
           "caches, which is required for MLPerf compliance."
       )
   )
+
+  flags.DEFINE_string(
+      name="distribute_strategy",
+      default="ParameterServer",
+      help=flags_core.help_wrap(
+          "distribute strategy want to use during training,"
+          "available value is 'ParameterServer','Mirror',"
+          "'CollectiveAllReduce'.default value is 'ParameterServer'"))
 
   flags.DEFINE_integer(
       name="seed", default=None, help=flags_core.help_wrap(
