@@ -138,6 +138,14 @@ big | 28.9
    * `--param_set`: Parameter set to use when creating and training the model. Options are `base` and `big` (default).
    * Use the `--help` or `-h` flag to get a full list of possible arguments.
 
+   To run it in distributed environment:
+
+   1. update the file: `std_worker.py` to use correct cluster information and correct rpc_layer information.
+   2. update the file: `multi_node_transformer_main.py` to use correct remote_cluster information.
+   3. `python std_worker.py` on each node of the cluster.
+   4. `python multi_node_transformer_main.py --data_dir=$DATA_DIR --model_dir=$MODEL_DIR \
+       --vocab_file=$VOCAB_FILE --param_set=$PARAM_SET` on any node.
+
    #### Customizing training schedule
 
    By default, the model will train for 10 epochs, and evaluate after every epoch. The training schedule may be defined through the flags:
