@@ -1,71 +1,227 @@
-# Recommendation Model
-## Overview
-This is an implementation of the Neural Collaborative Filtering (NCF) framework with Neural Matrix Factorization (NeuMF) model as described in the [Neural Collaborative Filtering](https://arxiv.org/abs/1708.05031) paper. Current implementation is based on the code from the authors' [NCF code](https://github.com/hexiangnan/neural_collaborative_filtering) and the Stanford implementation in the [MLPerf Repo](https://github.com/mlperf/reference/tree/master/recommendation/pytorch).
+i### 1. train NeuMF model
+#### 1.1 environment requirment
+NeuMF model is a tensorflow version of Neural Collaborative Filtering (NCF) framework with Neural Matrix Factorization (NeuMF) model as described in the [Neural Collaborative Filtering](https://arxiv.org/abs/1708.05031) paper, below are the conditions to be satificated before train this model:
+* **TensorFlow**: current version is r1.12
+* **Requirments**: there is an text file named `requirments.txt` in `models/official`, this file list all python package requested by NeuMF code, run `sudo pip install -r official/requirements.txt` to auto install python dependencies.
+* **Environment Variable**: add path of `official` dir to environment variable `PYTHONPATH` to enable python find requested file by `import official/xxx`  in the begin of code. Assuming that path of ` official ` is `/home/ubuntu/models-master`, the commend is `export PYTHONPATH=$PYTHONPATH:/home/ubuntu/models-master/`.
+#### 1.2 command line argument
+* **--model_dir**
+TensorFlow will save many files during train such as checkpoint and summary files into a fixed dir, and the dir can be specified by `--model_dir` , such as `--model_dir /tmp/ncf_model`.
+* **--dataset**
+NeuMF model has two dataset:`ml-1m` and `ml-20m`, this argument decide which dataset is used during train.  [Here](https://github.com/tensorflow/models/tree/master/official/recommendation) show the detailed information of the two dataset.
+* **--num_gpus**
+When train NeuMF model with [distribute strategy](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/distribute), it is import to let distrubute strategy know how many GPU a worker can use, code will pass argument `--num_gpus` to distribute strategy to let it know how many GPU this worker will use, such as `--num_gpus 4`.
+* **--clean**
+Before train,delete all files in model_dir which is specified by argument `--model_dir`, such as `--clean`.
+* **--distribute_strategy**
+When distributed train NeuMF models, it is possible to select an distribute strategy, and all value supported now is `ParameterServer` and `Mirror`.  [Here](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/distribute)  is the detailed information of each distribute strategy. The argument should be used such as `--distribute_strategy Mirror`
+* **--train_epochs**
+A epoach is that TensorFlow has finish dealing with all examples in dataset, this argument decide how many epochs code will run, such as `--train_epoachs 1`.
+* **--batch_size**
+Value of batch size during train, notice that value of this argument is batch size of a process. If train process has 4 GPU, batch size of train process will be `4 * 1024000 `for ParameterServer strategy, `4 * 2048000` for Mirror strategy now. Actually,value `1024000`  is max value of batch size of a GPU when use ParameterServer strategy, value `2048000`  is max value of batch size of a GPU when use Mirror strategy.
+* **--cache_id**
+Before train NeuMF model, there is a step converting data in csv file into tfrecord file, these tfrecord files save in a dictionary whose name contain a random number such as `1544425230_ncf_recommendation_cache` and tensorFlow will read tfrecord files in this directory during training. When `--cache_id 267304` appreas in command line, name of directory contain a fixed number `267304`, this is useful when train with `Mirror strategy` and will cause an error when use `ParameterServer strategy`. 
 
-NCF is a general framework for collaborative filtering of recommendations in which a neural network architecture is used to model user-item interactions. Unlike traditional models, NCF does not resort to Matrix Factorization (MF) with an inner product on latent features of users and items. It replaces the inner product with a multi-layer perceptron that can learn an arbitrary function from data.
+There are some other command line argument, and these argument set to default value and no need to change.  Almost all command line argument can be seen in function `define_ncf_flags`  in ` models/official/recommendation/ncf_main.py` , the others are common amoung all other models and can be found in `models/official/utils/flags/_base.py`.
+#### 1.3 distributed train
+A worker is a train process and train with one worker is called `local train` and train with one more workers is called `distributed train`. 
+* **local train**: run `python models/official/recommendation/ncf_main.py` with command line argument will run local train. Notice `--distribute_strategy`  is also can be used in local train.
+* **distributed train**:when distributed train, environment variable `TF_CONFIG` is necessary for each worker, `TF_CONFIG` variable contains tasks and ip port pair of each worker. Detailed information about `distributed train` and `TF_COINFIG` see [Distribute TensorFlow](https://www.tensorflow.org/deploy/distributed).
 
-Two instantiations of NCF are Generalized Matrix Factorization (GMF) and Multi-Layer Perceptron (MLP). GMF applies a linear kernel to model the latent feature interactions, and and MLP uses a nonlinear kernel to learn the interaction function from data. NeuMF is a fused model of GMF and MLP to better model the complex user-item interactions, and unifies the strengths of linearity of MF and non-linearity of MLP for modeling the user-item latent structures. NeuMF allows GMF and MLP to learn separate embeddings, and combines the two models by concatenating their last hidden layer. [neumf_model.py](neumf_model.py) defines the architecture details.
-
-Some abbreviations used the code base include:
-  - NCF: Neural Collaborative Filtering
-  - NeuMF: Neural Matrix Factorization
-  - GMF: Generalized Matrix Factorization
-  - MLP: Multi-Layer Perceptron
-  - HR: Hit Ratio (HR)
-  - NDCG: Normalized Discounted Cumulative Gain
-  - ml-1m: MovieLens 1 million dataset
-  - ml-20m: MovieLens 20 million dataset
-
-## Dataset
-The [MovieLens datasets](http://files.grouplens.org/datasets/movielens/) are used for model training and evaluation. Specifically, we use two datasets: **ml-1m** (short for MovieLens 1 million) and **ml-20m** (short for MovieLens 20 million).
-
-### ml-1m
-ml-1m dataset contains 1,000,209 anonymous ratings of approximately 3,706 movies made by 6,040 users who joined MovieLens in 2000. All ratings are contained in the file "ratings.dat" without header row, and are in the following format:
+There are two simple scripts to show how to run `local train` and `distributed train`:
+* local train:
 ```
-  UserID::MovieID::Rating::Timestamp
+#!/usr/bin/env bash
+
+# dataset and batch size
+NUM_GPU=4
+DATASET="ml-20m"
+BATCH_SIZE_BASE=1024000
+export CUDA_VISIBLE_DEVICES="0,1,2,3"
+DISTRIBUTE_STRATEGY='ParameterServer'
+BATCH_SIZE=`echo $(($NUM_GPU*$BATCH_SIZE_BASE))`
+echo "BATCH SIZE IS ${BATCH_SIZE}"
+
+# model save dir
+MODEL_DIR='/tmp/ncf_model'
+if [ ! -d "${MODEL_DIR}" ]; then
+    mkdir ${MODEL_DIR}
+else
+    echo "MODLE DIR ${MODEL_DIR} already exist"
+fi
+
+# log and output save dir
+LOG_BASE="/home/ubuntu/ncf_log/1_node_1_worker"
+DATE=`date '+%Y-%m-%d'`
+LOG_DIR="${LOG_BASE}/${DATE}"
+
+if [ ! -d "${LOG_DIR}" ]; then
+    mkdir -p ${LOG_DIR}
+else
+    echo "LOG DIR ${LOG_DIR} already exist"
+fi
+
+# log file
+PID=$$
+DATE=`date '+%H-%M-%S'`
+FILE_NAME="ncf_ps_log_${PID}_${DATE}.txt"
+LOG_FILE="${LOG_DIR}/${FILE_NAME}"
+
+# PYTHONPATH environment variable
+export PYTHONPATH='/home/ubuntu/models-master'
+
+# create log file
+touch ${LOG_FILE}
+echo "output saves to ${LOG_FILE}"
+
+python ../../official/recommendation/ncf_main.py \
+    --model_dir ${MODEL_DIR} \
+    --dataset ${DATASET} --hooks "" \
+    --num_gpus ${NUM_GPU} \
+    --clean \
+    --distribute_strategy ${DISTRIBUTE_STRATEGY} \
+    --train_epochs 1 \
+    --batch_size ${BATCH_SIZE} \
+    --eval_batch_size 100000 \
+    --learning_rate 0.0005 \
+    --layers 256,256,128,64 --num_factors 64 \
+    --hr_threshold 0.635 \
+    --ml_perf 2>&1 | tee ${LOG_FILE}
+
+echo "output saves to ${LOG_FILE}"
 ```
-  - UserIDs range between 1 and 6040.
-  - MovieIDs range between 1 and 3952.
-  - Ratings are made on a 5-star scale (whole-star ratings only).
-
-### ml-20m
-ml-20m dataset contains 20,000,263 ratings of 26,744 movies by 138493 users. All ratings are contained in the file "ratings.csv". Each line of this file after the header row represents one rating of one movie by one user, and has the following format:
+* distributed train:
 ```
-userId,movieId,rating,timestamp
+#!/usr/bin/env bash
+
+echo "begin to start NeuMF model train process"
+
+TF_CONFIG='{
+    "cluster": {
+        "worker": ["10.0.22.2:5000", "10.0.24.3:5000"]
+    },
+   "task": {"type": "worker", "index": 1},
+   "rpc_layer":"grpc"
+}'
+
+# dataset and batch size
+NUM_GPU=4
+DATASET="ml-20m"
+BATCH_SIZE_BASE=2048000
+export CUDA_VISIBLE_DEVICES="0,1,2,3"
+DISTRIBUTE_STRATEGY='Mirror'
+BATCH_SIZE=`echo $(($NUM_GPU*$BATCH_SIZE_BASE))`
+echo "BATCH SIZE IS ${BATCH_SIZE}"
+
+MODEL_DIR='/tmp/ncf_model'
+if [ ! -d "${MODEL_DIR}" ]; then
+    mkdir ${MODEL_DIR}
+else
+    echo "MODLE DIR ${MODEL_DIR} already exist"
+fi
+
+# log and output save dir
+LOG_BASE="/home/zxy/ncf_log/2_node_2_worker"
+DATE=`date '+%Y-%m-%d'`
+LOG_DIR="${LOG_BASE}/${DATE}"
+
+if [ ! -d "${LOG_DIR}" ]; then
+    mkdir -p ${LOG_DIR}
+else
+    echo "LOG DIR ${LOG_DIR} already exist"
+fi
+
+# log file
+PID=$$
+DATE=`date '+%H-%M-%S'`
+FILE_NAME="ncf_2_node_mirror_log_${PID}_${DATE}.txt"
+LOG_FILE="${LOG_DIR}/${FILE_NAME}"
+
+# PYTHONPATH environment variable
+export PYTHONPATH='/home/zxy/models-master'
+
+# create log file
+touch ${LOG_FILE}
+echo "output saves to ${LOG_FILE}"
+
+python ../../official/recommendation/ncf_main.py \
+    --model_dir ${MODEL_DIR} \
+    --dataset ${DATASET} --hooks "" \
+    --num_gpus ${NUM_GPU} \
+    --clean \
+    --distribute_strategy ${DISTRIBUTE_STRATEGY} \
+    --train_epochs 1 \
+    --batch_size ${BATCH_SIZE} \
+    --eval_batch_size 100000 \
+    --learning_rate 0.0005 \
+    --layers 256,256,128,64 --num_factors 64 \
+    --hr_threshold 0.635 \
+    --cache_id 267304 \
+    --ml_perf 2>&1 | tee ${LOG_FILE}
+
+echo "output saves to ${LOG_FILE}"
 ```
-  - The lines within this file are ordered first by userId, then, within user, by movieId.
-  - Ratings are made on a 5-star scale, with half-star increments (0.5 stars - 5.0 stars).
 
-In both datasets, the timestamp is represented in seconds since midnight Coordinated Universal Time (UTC) of January 1, 1970. Each user has at least 20 ratings.
+The different of `local train` script and `distributed train` script is that `distributed train` need `TF_CONFIG` variable and `local train` don't. And when runing `distributed train`, one more worker is needed so run scripts mulitiple times in single server or one more server with `index`   and `type` value changed in `TF_CONFIG`,  value of `rpc_layer`  is `grpc` or `grpc+gdr`  normally, and value of `rpc_layer` decide which transport method want to use. Detailed information of `TF_CONFIG` see [TF_CONFIG environment variable](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/distribute/#tf_config-environment-variable).  Environment variable `CUDA_VISIBLE_DEVICES`  can control how many GPU a worker can use, more information see [here](https://devblogs.nvidia.com/cuda-pro-tip-control-gpu-visibility-cuda_visible_devices/). Notice if `CUDA_VISIBLE_DEVICES` changed such as change from `'0,1,2,3'` to `'0'`, command line argument `--num_gpus` may need to change otherwise distributed strategy will not work well.
 
-## Running Code
-
-### Download and preprocess dataset
-To download the dataset, please install Pandas package first. Then issue the following command:
+### 2. code change
+#### 2.1 choose distribute strategy
+The function `construct_estimator`  in `ncf_main.py` create estimator with distribute strategy, and original version choose distribute strategy with number of GPU a worker can use:
 ```
-python ../datasets/movielens.py
+  distribution = distribution_utils.get_distribution_strategy(num_gpus=num_gpus)
+  run_config = tf.estimator.RunConfig(train_distribute=distribution,eval_distribute=distribution)
+  params["eval_batch_size"] = eval_batch_size
+  model_fn = neumf_model.neumf_model_fn
+  if params["use_xla_for_gpu"]:
+    tf.logging.info("Using XLA for GPU for training and evaluation.")
+    model_fn = xla.estimator_model_fn(model_fn)
+  estimator = tf.estimator.Estimator(model_fn=model_fn, model_dir=model_dir,
+                                     config=run_config, params=params)
+  return estimator, estimator
 ```
-Arguments:
-  * `--data_dir`: Directory where to download and save the preprocessed data. By default, it is `/tmp/movielens-data/`.
-  * `--dataset`: The dataset name to be downloaded and preprocessed. By default, it is `ml-1m`.
 
-Use the `--help` or `-h` flag to get a full list of possible arguments.
-
-Note the ml-20m dataset is large (the rating file is ~500 MB), and it may take several minutes (~2 mins) for data preprocessing.
-Both the ml-1m and ml-20m datasets will be coerced into a common format when downloaded.
-
-### Train and evaluate model
-To train and evaluate the model, issue the following command:
+new version choose distribute strategy via command line argument:
 ```
-python ncf_main.py
+  tf.logging.info("num_gpus is %d in construct_estimator" % num_gpus)
+  distribute_strategy = params['distribute_strategy']
+  if distribute_strategy == 'ParameterServer':
+    distribution = tf.contrib.distribute.ParameterServerStrategy(num_gpus_per_worker=num_gpus)
+    tf.logging.info("num_gpus_per_worker is %d in ParameterServerStrategy" % num_gpus)
+    tf.logging.info("num tower of ParameterStrategy is %d" % distribution.num_towers)
+    tf.logging.info("distribute strategy is ParameterServer")
+  elif distribute_strategy == 'Mirror':
+    tf.logging.info("distribute strategy is Mirror")
+    distribution = distribution_utils.get_distribution_strategy(num_gpus=num_gpus)
+  else:
+    tf.logging.info("No distribute strategy found,exit")
+    exit(1)
+
+  run_config = tf.estimator.RunConfig(
+    # save_checkpoints_steps=None,
+    # save_checkpoints_secs=None,
+    model_dir=model_dir,
+    log_step_count_steps=10,
+    train_distribute=distribution,
+    eval_distribute=distribution
+  )
+  estimator = tf.estimator.Estimator(model_fn=model_fn, model_dir=model_dir,
+                                     config=run_config, params=params)
+  return estimator
 ```
-Arguments:
-  * `--model_dir`: Directory to save model training checkpoints. By default, it is `/tmp/ncf/`.
-  * `--data_dir`: This should be set to the same directory given to the `data_download`'s `data_dir` argument.
-  * `--dataset`: The dataset name to be downloaded and preprocessed. By default, it is `ml-1m`.
+#### 2.2 change API to support distribute train
+Origin version use `tf.estimator.Estimator.trian`  to train and use `tf.estimator.Estimator.evaluate` to evaluate in `run_ncf` function in `ncf_main.py`, and it is hard to train in multiple workers,and new version use `tf.estimator.train_and_evaluate`  in `run_ncf` function to run local and distributed train.
 
-There are other arguments about models and training process. Use the `--help` or `-h` flag to get a full list of possible arguments with detailed descriptions.
+original version:
+```
+train_estimator.train(input_fn=train_input_fn, hooks=train_hooks,steps=num_train_steps)
+eval_results = eval_estimator.evaluate(eval_input_fn,steps=num_eval_steps)
+```
 
-## Benchmarks (TODO)
-### Training times
-### Evaluation results
+new version:
+```
+   train_spec = tf.estimator.TrainSpec(train_input_fn,max_steps=5000,hooks=train_hooks)
+   eval_spec = tf.estimator.EvalSpec(eval_input_fn,steps=100)
+   tf.estimator.train_and_evaluate(estimator,train_spec,eval_spec)
+```
+### 3. official README.md
+This file is not official's original README.md, official's README.md see [here](https://github.com/tensorflow/models/blob/master/official/recommendation/README.md).
