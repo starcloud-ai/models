@@ -1,4 +1,4 @@
-i### 1. train NeuMF model
+### 1. train NeuMF model
 #### 1.1 environment requirment
 NeuMF model is a tensorflow version of Neural Collaborative Filtering (NCF) framework with Neural Matrix Factorization (NeuMF) model as described in the [Neural Collaborative Filtering](https://arxiv.org/abs/1708.05031) paper, below are the conditions to be satificated before train this model:
 * **TensorFlow**: current version is r1.12
