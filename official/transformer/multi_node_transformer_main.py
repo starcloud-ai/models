@@ -346,8 +346,8 @@ def run_loop(
 
     tf.logging.info("Evaluation results (iter %d/%d):" %
                     (i + 1, schedule_manager.train_eval_iterations))
-    tf.logging.info(eval_results)
-    benchmark_logger.log_evaluation_result(eval_results)
+    #tf.logging.info(eval_results)
+    #benchmark_logger.log_evaluation_result(eval_results)
 
     # The results from estimator.evaluate() are measured on an approximate
     # translation, which utilize the target golden values provided. The actual
