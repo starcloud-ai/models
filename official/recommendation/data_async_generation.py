@@ -531,8 +531,6 @@ def main(_):
   cache_paths = rconst.Paths(
       data_dir=flags.FLAGS.data_dir, cache_id=flags.FLAGS.cache_id)
 
-  import pdb
-  pdb.set_trace()
   write_alive_file(cache_paths=cache_paths)
 
   flagfile = os.path.join(cache_paths.cache_root, rconst.FLAGFILE)
