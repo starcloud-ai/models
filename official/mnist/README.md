@@ -73,6 +73,22 @@ TensorFlow graph using:
 python mnist_eager.py
 ```
 
+To run it in distributed environment:
+
+  Ensure that PYTHONPATH is correctly defined as described in https://github.com/tensorflow/models/tree/master/official#requirements export PYTHONPATH="$PYTHONPATH:/path/to/models"
+
+  download dataset, and store to /tmp/mnist_data/ , by just running python mnist.py on each node. or download using these URLs.
+
+    Download https://storage.googleapis.com/cvdf-datasets/mnist/train-images-idx3-ubyte.gz to /tmp/mnist_data/
+    Download https://storage.googleapis.com/cvdf-datasets/mnist/train-labels-idx1-ubyte.gz to /tmp/mnist_data/
+
+  1. update the file: std_worker.py to use correct cluster information and correct rpc_layer information.
+  2. update the file: multi_node_transformer_main.py to use correct remote_cluster information.
+  3. python std_worker.py on each node of the cluster.
+  4. python std_ps.py on each node of the cluster according to the distributiion strategy used.
+  5. python multi_node_mnist.py on any node.
+
+
 ## Experimental: TPU Acceleration
 
 `mnist.py` (and `mnist_eager.py`) demonstrate training a neural network to
