@@ -530,6 +530,9 @@ def main(_):
   global _log_file
   cache_paths = rconst.Paths(
       data_dir=flags.FLAGS.data_dir, cache_id=flags.FLAGS.cache_id)
+
+  import pdb
+  pdb.set_trace()
   write_alive_file(cache_paths=cache_paths)
 
   flagfile = os.path.join(cache_paths.cache_root, rconst.FLAGFILE)
@@ -538,7 +541,7 @@ def main(_):
   redirect_logs = flags.FLAGS.redirect_logs
 
   log_file_name = "data_gen_proc_{}.log".format(cache_paths.cache_id)
-  log_path = os.path.join(cache_paths.data_dir, log_file_name)
+  log_path = os.path.join(cache_paths.cache_root, log_file_name)
   if log_path.startswith("gs://") and redirect_logs:
     fallback_log_file = os.path.join(tempfile.gettempdir(), log_file_name)
     print("Unable to log to {}. Falling back to {}"

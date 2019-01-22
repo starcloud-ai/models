@@ -135,11 +135,8 @@ def construct_estimator(num_gpus, model_dir, iterations, params, batch_size,
 
   run_config = tf.estimator.RunConfig(
     model_dir=model_dir,
-    log_step_count_steps=10,
     train_distribute=distribution,
     eval_distribute=distribution,
-    save_checkpoints_steps=None,
-    save_checkpoints_secs=None
   )
   estimator = tf.estimator.Estimator(model_fn=model_fn, model_dir=model_dir,
                                      config=run_config, params=params)

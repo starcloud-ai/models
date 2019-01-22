@@ -342,14 +342,14 @@ def construct_cache(dataset, data_dir, num_data_readers, match_mlperf,
     deterministic: Try to enforce repeatable behavior, even at the cost of
       performance.
   """
-  cache_paths = rconst.Paths(data_dir=data_dir, cache_id=cache_id)
+  cache_paths = rconst.Paths(data_dir='/tmp', cache_id=cache_id)
   num_data_readers = (num_data_readers or int(multiprocessing.cpu_count() / 2)
                       or 1)
   approx_num_shards = int(movielens.NUM_RATINGS[dataset]
                           // rconst.APPROX_PTS_PER_TRAIN_SHARD) or 1
 
   st = timeit.default_timer()
-  cache_root = os.path.join(data_dir, cache_paths.cache_root)
+  cache_root = '/tmp/ncf_{}'.format(cache_id)
   if tf.gfile.Exists(cache_root):
       tf.gfile.DeleteRecursively(cache_root)
 
@@ -422,10 +422,13 @@ def write_flagfile(flags_, ncf_dataset):
                                rconst.FLAGFILE_TEMP)
   tf.logging.info("Preparing flagfile for async data generation in {} ..."
                   .format(flagfile_temp))
+  flagfile = os.path.join(ncf_dataset.cache_paths.cache_root, rconst.FLAGFILE)
+  if tf.gfile.Exists(flagfile):
+    tf.gfile.DeleteRecursively(flagfile)
+
   with tf.gfile.Open(flagfile_temp, "w") as f:
     for k, v in six.iteritems(flags_):
       f.write("--{}={}\n".format(k, v))
-  flagfile = os.path.join(ncf_dataset.cache_paths.cache_root, rconst.FLAGFILE)
   tf.gfile.Rename(flagfile_temp, flagfile)
   tf.logging.info(
       "Wrote flagfile for async data generation in {}.".format(flagfile))
@@ -437,9 +440,9 @@ def instantiate_pipeline(dataset, data_dir, batch_size, eval_batch_size,
                          cache_id=None):
   # type: (...) -> (NCFDataset, typing.Callable)
   """Preprocess data and start negative generation subprocess."""
-
   tf.logging.info("Beginning data preprocessing.")
-  tf.gfile.MakeDirs(data_dir)
+  if not tf.gfile.Exists(data_dir):
+    tf.gfile.MakeDirs(data_dir)
   ncf_dataset = construct_cache(dataset=dataset, data_dir=data_dir,
                                 num_data_readers=num_data_readers,
                                 match_mlperf=match_mlperf,
@@ -697,6 +700,8 @@ def get_epoch_info(is_training, ncf_dataset):
       tf.logging.info("Waiting for data folder to be created.")
       time.sleep(1)
       train_data_dirs = tf.gfile.ListDirectory(train_epoch_dir)
+
+    print('train_data_dirs is {}'.format(train_data_dirs))
     train_data_dirs.sort()  # names are zfilled so that
                             # lexicographic sort == numeric sort
     record_dir = os.path.join(train_epoch_dir, train_data_dirs[0])
