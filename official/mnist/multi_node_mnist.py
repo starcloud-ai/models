@@ -13,10 +13,6 @@
 #  limitations under the License.
 """Convolutional Neural Network Estimator for MNIST, built with tf.layers."""
 
-#os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
-os.environ['CUDA_VISIBLE_DEVICES'] = ""
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
-os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '0'
 
 from __future__ import absolute_import
 from __future__ import division
@@ -31,6 +27,11 @@ from official.utils.flags import core as flags_core
 from official.utils.logs import hooks_helper
 from official.utils.misc import distribution_utils
 from official.utils.misc import model_helpers
+import os
+#os.environ['CUDA_VISIBLE_DEVICES'] = "0,1"
+os.environ['CUDA_VISIBLE_DEVICES'] = ""
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+os.environ['TF_CPP_MIN_VLOG_LEVEL'] = '0'
 
 
 LEARNING_RATE = 1e-4
