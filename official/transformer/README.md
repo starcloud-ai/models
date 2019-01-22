@@ -140,18 +140,18 @@ big | 28.9
 
    To run it in distributed environment:
 
-   # Ensure that PYTHONPATH is correctly defined as described in
-   # https://github.com/tensorflow/models/tree/master/official#requirements
-   # export PYTHONPATH="$PYTHONPATH:/path/to/models"
+    Ensure that PYTHONPATH is correctly defined as described in
+    https://github.com/tensorflow/models/tree/master/official#requirements
+    export PYTHONPATH="$PYTHONPATH:/path/to/models"
 
-   # Export variables
-   PARAM_SET=big
-   DATA_DIR=$HOME/transformer/data
-   MODEL_DIR=$HOME/transformer/model_$PARAM_SET
-   VOCAB_FILE=$DATA_DIR/vocab.ende.32768
+    Export variables
+    PARAM_SET=big
+    DATA_DIR=$HOME/transformer/data
+    MODEL_DIR=$HOME/transformer/model_$PARAM_SET
+    VOCAB_FILE=$DATA_DIR/vocab.ende.32768
 
-   # Download training/evaluation datasets
-   python data_download.py --data_dir=$DATA_DIR
+    Download training/evaluation datasets
+    python data_download.py --data_dir=$DATA_DIR
 
    1. update the file: `std_worker.py` to use correct cluster information and correct rpc_layer information.
    2. update the file: `multi_node_transformer_main.py` to use correct remote_cluster information.
