@@ -92,13 +92,12 @@ This will print out the predicted classes and class probabilities. Class 0 is th
 
 Ensure that PYTHONPATH is correctly defined as described in https://github.com/tensorflow/models/tree/master/official#requirements export PYTHONPATH="$PYTHONPATH:/path/to/models"
 
-download dataset by 
-```python census_dataset.py```
-update the file: std_worker.py to use correct cluster information and correct rpc_layer information.
-update the file: multi_node_census_main.py to use correct remote_cluster information.
-python std_worker.py on each node of the cluster.
-python std_ps.py on each node of the cluster according to the distributiion strategy used.
-python multi_node_census_main.py on any node.
+  1. download dataset by ```python census_dataset.py```
+  2. update the file: std_worker.py to use correct cluster information and correct rpc_layer information.
+  3. update the file: multi_node_census_main.py to use correct remote_cluster information.
+  4. python std_worker.py on each node of the cluster.
+  5. python std_ps.py on each node of the cluster according to the distributiion strategy used.
+  6. python multi_node_census_main.py on any node.
 
 
 ## Additional Links
