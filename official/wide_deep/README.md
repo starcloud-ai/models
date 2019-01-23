@@ -88,6 +88,19 @@ saved_model_cli run --dir /tmp/wide_deep_saved_model/${TIMESTAMP}/ \
 
 This will print out the predicted classes and class probabilities. Class 0 is the <=50k group and 1 is the >50k group.
 
+## To run it in distributed environment:
+
+Ensure that PYTHONPATH is correctly defined as described in https://github.com/tensorflow/models/tree/master/official#requirements export PYTHONPATH="$PYTHONPATH:/path/to/models"
+
+download dataset by 
+```python census_dataset.py```
+update the file: std_worker.py to use correct cluster information and correct rpc_layer information.
+update the file: multi_node_census_main.py to use correct remote_cluster information.
+python std_worker.py on each node of the cluster.
+python std_ps.py on each node of the cluster according to the distributiion strategy used.
+python multi_node_census_main.py on any node.
+
+
 ## Additional Links
 
 If you are interested in distributed training, take a look at [Distributed TensorFlow](https://www.tensorflow.org/deploy/distributed).
