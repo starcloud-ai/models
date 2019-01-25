@@ -410,6 +410,7 @@ def _generation_loop(num_workers,           # type: int
                      num_items,             # type: int
                      num_users,             # type: int
                      epochs_per_cycle,      # type: int
+                     num_cycles,            # type: int
                      train_batch_size,      # type: int
                      eval_batch_size,       # type: int
                      deterministic,         # type: bool
@@ -449,7 +450,7 @@ def _generation_loop(num_workers,           # type: int
 
   wait_count = 0
   start_time = time.time()
-  while True:
+  while train_cycle < num_cycles:
     ready_epochs = tf.gfile.ListDirectory(cache_paths.train_epoch_dir)
     if len(ready_epochs) >= rconst.CYCLES_TO_BUFFER:
       wait_count += 1
@@ -529,6 +530,7 @@ def main(_):
   global _log_file
   cache_paths = rconst.Paths(
       data_dir=flags.FLAGS.data_dir, cache_id=flags.FLAGS.cache_id)
+
   write_alive_file(cache_paths=cache_paths)
 
   flagfile = os.path.join(cache_paths.cache_root, rconst.FLAGFILE)
@@ -537,7 +539,7 @@ def main(_):
   redirect_logs = flags.FLAGS.redirect_logs
 
   log_file_name = "data_gen_proc_{}.log".format(cache_paths.cache_id)
-  log_path = os.path.join(cache_paths.data_dir, log_file_name)
+  log_path = os.path.join(cache_paths.cache_root, log_file_name)
   if log_path.startswith("gs://") and redirect_logs:
     fallback_log_file = os.path.join(tempfile.gettempdir(), log_file_name)
     print("Unable to log to {}. Falling back to {}"
@@ -567,6 +569,7 @@ def main(_):
           num_items=flags.FLAGS.num_items,
           num_users=flags.FLAGS.num_users,
           epochs_per_cycle=flags.FLAGS.epochs_per_cycle,
+          num_cycles=flags.FLAGS.num_cycles,
           train_batch_size=flags.FLAGS.train_batch_size,
           eval_batch_size=flags.FLAGS.eval_batch_size,
           deterministic=flags.FLAGS.seed is not None,
@@ -608,6 +611,9 @@ def define_flags():
   flags.DEFINE_integer(name="epochs_per_cycle", default=1,
                        help="The number of epochs of training data to produce"
                             "at a time.")
+  flags.DEFINE_integer(name="num_cycles", default=None,
+                       help="The number of cycles to produce training data "
+                            "for.")
   flags.DEFINE_integer(name="train_batch_size", default=None,
                        help="The batch size with which training TFRecords will "
                             "be chunked.")

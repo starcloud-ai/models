@@ -28,7 +28,7 @@ class Paths(object):
     self.cache_id = cache_id or int(time.time())
     self.data_dir = data_dir
     self.cache_root = os.path.join(
-        self.data_dir, "{}_ncf_recommendation_cache".format(self.cache_id))
+        '/tmp', "{}_ncf_recommendation_cache".format(self.cache_id))
     self.train_shard_subdir = os.path.join(self.cache_root,
                                            "raw_training_shards")
     self.train_shard_template = os.path.join(self.train_shard_subdir,
@@ -57,6 +57,10 @@ TOP_K = 10  # Top-k list for evaluation
 HR_KEY = "HR"
 NDCG_KEY = "NDCG"
 DUPLICATE_MASK = "duplicate_mask"
+
+# Metric names
+HR_METRIC_NAME = "HR_METRIC"
+NDCG_METRIC_NAME = "NDCG_METRIC"
 
 # ==============================================================================
 # == Subprocess Data Generation ================================================

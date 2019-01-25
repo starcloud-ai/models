@@ -100,7 +100,9 @@ def _download_and_clean(dataset, data_dir):
 
   expected_files = ["{}.zip".format(dataset), RATINGS_FILE, MOVIES_FILE]
 
-  tf.gfile.MakeDirs(data_subdir)
+  if not tf.gfile.Exists(data_subdir):
+    tf.gfile.MakeDirs(data_subdir)
+
   if set(expected_files).intersection(
       tf.gfile.ListDirectory(data_subdir)) == set(expected_files):
     tf.logging.info("Dataset {} has already been downloaded".format(dataset))
@@ -108,15 +110,14 @@ def _download_and_clean(dataset, data_dir):
 
   url = "{}{}.zip".format(_DATA_URL, dataset)
 
-  temp_dir = tempfile.mkdtemp()
+  # temp_dir = tempfile.mkdtemp()
+  temp_dir = '/tmp/ncf_dataset'
+  if not tf.gfile.Exists(temp_dir):
+    tf.gfile.MakeDirs(temp_dir)
+
   try:
     zip_path = os.path.join(temp_dir, "{}.zip".format(dataset))
-    def _progress(count, block_size, total_size):
-      sys.stdout.write("\r>> Downloading {} {:.1f}%".format(
-          zip_path, 100.0 * count * block_size / total_size))
-      sys.stdout.flush()
-
-    zip_path, _ = urllib.request.urlretrieve(url, zip_path, _progress)
+    zip_path, _ = urllib.request.urlretrieve(url, zip_path)
     statinfo = os.stat(zip_path)
     # A new line to clear the carriage return from download progress
     # tf.logging.info is not applicable here

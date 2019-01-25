@@ -125,3 +125,7 @@ class ExamplesPerSecondHook(tf.train.SessionRunHook):
         self._logger.log_metric(
             "current_examples_per_sec", current_examples_per_sec,
             global_step=global_step)
+
+        self._logger.log_metric(
+            "batch size",self._batch_size,
+            global_step=global_step)

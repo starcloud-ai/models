@@ -17,3 +17,8 @@ If you want to contribute to models, be sure to review the [contribution guideli
 ## License
 
 [Apache License 2.0](LICENSE)
+
+## To run with Distribution Strategy
+
+Please use branch r1.11 for mnist.
+Please use branch master for other models.

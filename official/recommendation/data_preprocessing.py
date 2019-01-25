@@ -152,7 +152,7 @@ def _filter_index_sort(raw_rating_path, match_mlperf):
   num_items = len(original_items)
 
   mlperf_helper.ncf_print(key=mlperf_helper.TAGS.PREPROC_HP_NUM_EVAL,
-                          value=num_users * (1 + rconst.NUM_EVAL_NEGATIVES))
+                          value=rconst.NUM_EVAL_NEGATIVES)
   mlperf_helper.ncf_print(
       key=mlperf_helper.TAGS.PREPROC_HP_SAMPLE_EVAL_REPLACEMENT,
       value=match_mlperf)
@@ -342,17 +342,17 @@ def construct_cache(dataset, data_dir, num_data_readers, match_mlperf,
     deterministic: Try to enforce repeatable behavior, even at the cost of
       performance.
   """
-  cache_paths = rconst.Paths(data_dir=data_dir, cache_id=cache_id)
+  cache_paths = rconst.Paths(data_dir='/tmp', cache_id=cache_id)
   num_data_readers = (num_data_readers or int(multiprocessing.cpu_count() / 2)
                       or 1)
   approx_num_shards = int(movielens.NUM_RATINGS[dataset]
                           // rconst.APPROX_PTS_PER_TRAIN_SHARD) or 1
 
   st = timeit.default_timer()
-  cache_root = os.path.join(data_dir, cache_paths.cache_root)
+  cache_root = '/tmp/ncf_{}'.format(cache_id)
   if tf.gfile.Exists(cache_root):
-    raise ValueError("{} unexpectedly already exists."
-                     .format(cache_paths.cache_root))
+      tf.gfile.DeleteRecursively(cache_root)
+
   tf.logging.info("Creating cache directory. This should be deleted on exit.")
   tf.gfile.MakeDirs(cache_paths.cache_root)
 
@@ -394,7 +394,8 @@ def _shutdown(proc):
     try:
       proc.send_signal(signal.SIGINT)
       time.sleep(5)
-      if proc.returncode is not None:
+      if proc.poll() is not None:
+        tf.logging.info("Train data creation subprocess ended")
         return  # SIGINT was handled successfully within 5 seconds
 
     except socket.error:
@@ -403,6 +404,7 @@ def _shutdown(proc):
     # Otherwise another second of grace period and then force kill the process.
     time.sleep(1)
     proc.terminate()
+    tf.logging.info("Train data creation subprocess killed")
   except:  # pylint: disable=broad-except
     tf.logging.error("Data generation subprocess could not be killed.")
 
@@ -420,23 +422,27 @@ def write_flagfile(flags_, ncf_dataset):
                                rconst.FLAGFILE_TEMP)
   tf.logging.info("Preparing flagfile for async data generation in {} ..."
                   .format(flagfile_temp))
+  flagfile = os.path.join(ncf_dataset.cache_paths.cache_root, rconst.FLAGFILE)
+  if tf.gfile.Exists(flagfile):
+    tf.gfile.DeleteRecursively(flagfile)
+
   with tf.gfile.Open(flagfile_temp, "w") as f:
     for k, v in six.iteritems(flags_):
       f.write("--{}={}\n".format(k, v))
-  flagfile = os.path.join(ncf_dataset.cache_paths.cache_root, rconst.FLAGFILE)
   tf.gfile.Rename(flagfile_temp, flagfile)
   tf.logging.info(
       "Wrote flagfile for async data generation in {}.".format(flagfile))
 
 def instantiate_pipeline(dataset, data_dir, batch_size, eval_batch_size,
-                         num_data_readers=None, num_neg=4, epochs_per_cycle=1,
-                         match_mlperf=False, deterministic=False,
-                         use_subprocess=True, cache_id=None):
+                         num_cycles, num_data_readers=None, num_neg=4,
+                         epochs_per_cycle=1, match_mlperf=False,
+                         deterministic=False, use_subprocess=True,
+                         cache_id=None):
   # type: (...) -> (NCFDataset, typing.Callable)
   """Preprocess data and start negative generation subprocess."""
-
   tf.logging.info("Beginning data preprocessing.")
-  tf.gfile.MakeDirs(data_dir)
+  if not tf.gfile.Exists(data_dir):
+    tf.gfile.MakeDirs(data_dir)
   ncf_dataset = construct_cache(dataset=dataset, data_dir=data_dir,
                                 num_data_readers=num_data_readers,
                                 match_mlperf=match_mlperf,
@@ -455,6 +461,7 @@ def instantiate_pipeline(dataset, data_dir, batch_size, eval_batch_size,
       "num_users": ncf_dataset.num_users,
       "num_readers": ncf_dataset.num_data_readers,
       "epochs_per_cycle": epochs_per_cycle,
+      "num_cycles": num_cycles,
       "train_batch_size": batch_size,
       "eval_batch_size": eval_batch_size,
       "num_workers": num_workers,
@@ -635,7 +642,7 @@ def make_input_fn(
           .format(epoch_metadata["batch_size"], batch_size))
     record_files_ds = tf.data.Dataset.list_files(record_files, shuffle=False)
 
-    interleave = tf.contrib.data.parallel_interleave(
+    interleave = tf.data.experimental.parallel_interleave(
         tf.data.TFRecordDataset,
         cycle_length=4,
         block_length=100000,
@@ -645,6 +652,7 @@ def make_input_fn(
 
     deserialize = make_deserialize(params, batch_size, is_training)
     dataset = record_files_ds.apply(interleave)
+    dataset = dataset.repeat(5)
     dataset = dataset.map(deserialize, num_parallel_calls=4)
     dataset = dataset.prefetch(32)
 
@@ -654,6 +662,16 @@ def make_input_fn(
     return dataset
 
   return input_fn, record_dir, batch_count
+
+
+def _check_subprocess_alive(ncf_dataset, directory):
+  if (not tf.gfile.Exists(ncf_dataset.cache_paths.subproc_alive) and
+      not tf.gfile.Exists(directory)):
+    # The generation subprocess must have been alive at some point, because we
+    # earlier checked that the subproc_alive file existed.
+    raise ValueError("Generation subprocess unexpectedly died. Data will not "
+                     "be available; exiting to avoid waiting forever.")
+
 
 
 def get_epoch_info(is_training, ncf_dataset):
@@ -669,14 +687,10 @@ def get_epoch_info(is_training, ncf_dataset):
     template: A string template of the files in `record_dir`.
       `template.format('*')` is a glob that matches all the record files.
   """
-  if not tf.gfile.Exists(ncf_dataset.cache_paths.subproc_alive):
-    # The generation subprocess must have been alive at some point, because we
-    # earlier checked that the subproc_alive file existed.
-    raise ValueError("Generation subprocess unexpectedly died. Data will not "
-                     "be available; exiting to avoid waiting forever.")
-
   if is_training:
     train_epoch_dir = ncf_dataset.cache_paths.train_epoch_dir
+    _check_subprocess_alive(ncf_dataset, train_epoch_dir)
+
     while not tf.gfile.Exists(train_epoch_dir):
       tf.logging.info("Waiting for {} to exist.".format(train_epoch_dir))
       time.sleep(1)
@@ -686,12 +700,15 @@ def get_epoch_info(is_training, ncf_dataset):
       tf.logging.info("Waiting for data folder to be created.")
       time.sleep(1)
       train_data_dirs = tf.gfile.ListDirectory(train_epoch_dir)
+
+    print('train_data_dirs is {}'.format(train_data_dirs))
     train_data_dirs.sort()  # names are zfilled so that
                             # lexicographic sort == numeric sort
     record_dir = os.path.join(train_epoch_dir, train_data_dirs[0])
     template = rconst.TRAIN_RECORD_TEMPLATE
   else:
     record_dir = ncf_dataset.cache_paths.eval_data_subdir
+    _check_subprocess_alive(ncf_dataset, record_dir)
     template = rconst.EVAL_RECORD_TEMPLATE
 
   ready_file = os.path.join(record_dir, rconst.READY_FILE)
