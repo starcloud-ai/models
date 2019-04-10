@@ -22,6 +22,7 @@ import numpy as np
 from absl import app as absl_app
 from absl import flags
 import tensorflow as tf
+import os
 # pylint: enable=g-bad-import-order
 
 from official.keras_application_models import dataset
@@ -49,6 +50,13 @@ MODELS = {
 
 def run_keras_model_benchmark(_):
   """Run the benchmark on keras model."""
+  os.environ['TF_CONFIG'] = '{\
+             "cluster": {\
+             "worker": ["10.0.22.3:11101", "10.0.22.3:11102"] \
+             },\
+             "task": {"type": "worker", "index": 0},\
+             "rpc_layer": "grpc"\
+             }'
   # Ensure a valid model name was supplied via command line argument
   if FLAGS.model not in MODELS.keys():
     raise AssertionError("The --model command line argument should "

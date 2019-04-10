@@ -254,7 +254,7 @@ def define_cifar_flags():
                           resnet_size='56',
                           train_epochs=182,
                           epochs_between_evals=10,
-                          batch_size=128,
+                          batch_size=256,
                           image_bytes_as_serving_input=False)
 
 
@@ -272,6 +272,15 @@ def run_cifar(flags_obj):
         '--image_bytes_as_serving_input cannot be set to True for CIFAR. '
         'This flag is only applicable to ImageNet.')
     return
+
+  os.environ['TF_CONFIG'] = '{\
+             "cluster": {\
+             "worker": ["10.0.22.3:11101", "10.0.22.3:11102"] \
+             },\
+             "task": {"type": "worker", "index": 0},\
+             "rpc_layer": "grpc"\
+             }'
+
   input_function = (flags_obj.use_synthetic_data and
                     get_synth_input_fn(flags_core.get_tf_dtype(flags_obj)) or
                     input_fn)
