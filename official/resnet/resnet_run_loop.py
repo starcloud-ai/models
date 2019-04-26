@@ -32,6 +32,7 @@ import os
 from absl import flags
 import tensorflow as tf
 from tensorflow.contrib.data.python.ops import threadpool
+from tensorflow.python.distribute import cross_device_ops as cross_device_ops_lib
 
 from official.resnet import resnet_model
 from official.utils.flags import core as flags_core
@@ -42,6 +43,7 @@ from official.resnet import imagenet_preprocessing
 from official.utils.misc import distribution_utils
 from official.utils.misc import model_helpers
 
+import pdb
 
 ################################################################################
 # Functions for input processing.
@@ -466,16 +468,26 @@ def resnet_main(
       inter_op_parallelism_threads=flags_obj.inter_op_parallelism_threads,
       intra_op_parallelism_threads=flags_obj.intra_op_parallelism_threads,
       allow_soft_placement=True)
+  #session_config.gpu_options.allow_growth = True
+  #session_config.gpu_options.per_process_gpu_memory_fraction = 0.3
 
-  distribution_strategy = distribution_utils.get_distribution_strategy(
-      flags_core.get_num_gpus(flags_obj), flags_obj.all_reduce_alg)
+  num_gpus = flags_obj.num_gpus
+  strategy = flags_obj.strategy
+  #pdb.set_trace()
+  if strategy == 'mirrored':
+    distribution_strategy = tf.contrib.distribute.MirroredStrategy(num_gpus_per_worker=num_gpus)
+  elif strategy == 'ps':
+    distribution_strategy = tf.contrib.distribute.ParameterServerStrategy(num_gpus_per_worker=num_gpus)
+  else:
+    distribution_strategy = tf.contrib.distribute.CollectiveAllReduceStrategy(num_gpus_per_worker=num_gpus, communication=cross_device_ops_lib.CollectiveCommunication.RING)
 
   # Creates a `RunConfig` that checkpoints every 24 hours which essentially
   # results in checkpoints determined only by `epochs_between_evals`.
   run_config = tf.estimator.RunConfig(
       train_distribute=distribution_strategy,
       session_config=session_config,
-      save_checkpoints_secs=60*60*24)
+      #save_checkpoints_secs=60*60*24)
+      save_checkpoints_secs=None)
 
   # Initializes model with all but the dense layer from pretrained ResNet.
   if flags_obj.pretrained_model_checkpoint_path is not None:
@@ -550,32 +562,40 @@ def resnet_main(
     #   Train for another 10 epochs and then evaluate.
     #   Train for a final 5 epochs (to reach 25 epochs) and then evaluate.
     n_loops = math.ceil(flags_obj.train_epochs / flags_obj.epochs_between_evals)
-    schedule = [flags_obj.epochs_between_evals for _ in range(int(n_loops))]
+    schedule = [flags_obj.epochs_between_evals for _ in range(int(1))]
     schedule[-1] = flags_obj.train_epochs - sum(schedule[:-1])  # over counting.
 
   for cycle_index, num_train_epochs in enumerate(schedule):
     tf.logging.info('Starting cycle: %d/%d', cycle_index, int(n_loops))
+    # if num_train_epochs:
+    #   classifier.train(input_fn=lambda: input_fn_train(num_train_epochs),
+    #                    hooks=train_hooks, max_steps=flags_obj.max_train_steps)
+    #
+    # tf.logging.info('Starting to evaluate.')
+    #
+    # # flags_obj.max_train_steps is generally associated with testing and
+    # # profiling. As a result it is frequently called with synthetic data, which
+    # # will iterate forever. Passing steps=flags_obj.max_train_steps allows the
+    # # eval (which is generally unimportant in those circumstances) to terminate.
+    # # Note that eval will run for max_train_steps each loop, regardless of the
+    # # global_step count.
+    # eval_results = classifier.evaluate(input_fn=input_fn_eval,
+    #                                    steps=flags_obj.max_train_steps)
+    #
+    # benchmark_logger.log_evaluation_result(eval_results)
+    #
+    # if model_helpers.past_stop_threshold(
+    #     flags_obj.stop_threshold, eval_results['accuracy']):
+    #   break
+    train_spec = tf.estimator.TrainSpec(input_fn=lambda: input_fn_train(num_train_epochs), max_steps=flags_obj.max_train_steps)
+    eval_spec = tf.estimator.EvalSpec(input_fn=input_fn_eval)
 
-    if num_train_epochs:
-      classifier.train(input_fn=lambda: input_fn_train(num_train_epochs),
-                       hooks=train_hooks, max_steps=flags_obj.max_train_steps)
-
-    tf.logging.info('Starting to evaluate.')
-
-    # flags_obj.max_train_steps is generally associated with testing and
-    # profiling. As a result it is frequently called with synthetic data, which
-    # will iterate forever. Passing steps=flags_obj.max_train_steps allows the
-    # eval (which is generally unimportant in those circumstances) to terminate.
-    # Note that eval will run for max_train_steps each loop, regardless of the
-    # global_step count.
-    eval_results = classifier.evaluate(input_fn=input_fn_eval,
-                                       steps=flags_obj.max_train_steps)
-
-    benchmark_logger.log_evaluation_result(eval_results)
-
-    if model_helpers.past_stop_threshold(
-        flags_obj.stop_threshold, eval_results['accuracy']):
-      break
+    print("Train is starting.")
+    if flags_obj.reduce_alg == None:
+      tf.estimator.train_and_evaluate(classifier, train_spec, eval_spec)
+    else:
+      tf.estimator.train_and_evaluate(classifier, train_spec, eval_spec, flags_obj.reduce_alg)
+    print("Train finished.")
 
   if flags_obj.export_dir is not None:
     # Exports a saved model for the given classifier.
@@ -628,6 +648,17 @@ def define_resnet_flags(resnet_size_choices=None):
           'the expense of image resize/cropping being done as part of model '
           'inference. Note, this flag only applies to ImageNet and cannot '
           'be used for CIFAR.'))
+
+  flags.DEFINE_string(
+      name='strategy', default='collective',
+      help=flags_core.help_wrap('select which strategy what you want:'
+                                '[mirrored, collective, ps]'))
+
+  flags.DEFINE_string(
+      name='reduce_alg', default=None,
+      help=flags_core.help_wrap('when you using MirroredStrategy you should select'
+                                'which reduce algorithm what you want:'
+                                '[nccl, xring, nccl/xring..etc]'))
 
   choice_kwargs = dict(
       name='resnet_size', short_name='rs', default='50',

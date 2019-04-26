@@ -32,7 +32,7 @@ DATA_URL = 'https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz'
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
-    '--data_dir', type=str, default='/tmp/cifar10_data',
+    '--data_dir', type=str, default='./cifar10_data',
     help='Directory to download data and extract the tarball')
 
 
@@ -60,4 +60,4 @@ def main(_):
 
 if __name__ == '__main__':
   FLAGS, unparsed = parser.parse_known_args()
-  tf.app.run(argv=[sys.argv[0]] + unparsed)
+  tf.compat.v1.app.run(argv=[sys.argv[0]] + unparsed)
